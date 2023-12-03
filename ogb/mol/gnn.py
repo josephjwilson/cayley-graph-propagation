@@ -5,11 +5,12 @@ import torch.nn.functional as F
 from torch_geometric.nn.inits import uniform
 
 from conv import GNN_node
+from expander import ExpanderConfig
 
 class GNN(torch.nn.Module):
 
     def __init__(self, num_tasks, num_layer = 5, emb_dim = 300, 
-                    gnn_type = 'gin', virtual_node = True, residual = False, drop_ratio = 0.5, JK = "last", graph_pooling = "mean"):
+                    gnn_type = 'gin', virtual_node = True, residual = False, drop_ratio = 0.5, JK = "last", graph_pooling = "mean", expander_config: ExpanderConfig = ExpanderConfig()):
         '''
             num_tasks (int): number of labels to be predicted
             virtual_node (bool): whether to add virtual node or not
@@ -28,7 +29,7 @@ class GNN(torch.nn.Module):
             raise ValueError("Number of GNN layers must be greater than 1.")
 
         ### GNN to generate node embeddings - removed virtual nodes
-        self.gnn_node = GNN_node(num_layer, emb_dim, JK = JK, drop_ratio = drop_ratio, residual = residual, gnn_type = gnn_type)
+        self.gnn_node = GNN_node(num_layer, emb_dim, JK = JK, drop_ratio = drop_ratio, residual = residual, gnn_type = gnn_type, expander_config=expander_config)
 
         ### Pooling function to generate whole-graph embeddings
         if self.graph_pooling == "sum":
@@ -50,9 +51,9 @@ class GNN(torch.nn.Module):
             self.graph_pred_linear = torch.nn.Linear(self.emb_dim, self.num_tasks)
 
     def forward(self, batched_data):
-        h_node = self.gnn_node(batched_data)
+        h_node, batch_indicator = self.gnn_node(batched_data)
 
-        h_graph = self.pool(h_node, batched_data.batch)
+        h_graph = self.pool(h_node, batch_indicator)
 
         return self.graph_pred_linear(h_graph)
 

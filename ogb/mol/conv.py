@@ -7,6 +7,8 @@ from torch_geometric.utils import degree
 
 import math
 
+from expander import ExpanderConfig
+
 ### GIN convolution along the graph structure
 class GINConv(MessagePassing):
     def __init__(self, emb_dim):
@@ -39,7 +41,7 @@ class GNN_node(torch.nn.Module):
     Output:
         node representations
     """
-    def __init__(self, num_layer, emb_dim, drop_ratio = 0.5, JK = "last", residual = False, gnn_type = 'gin'):
+    def __init__(self, num_layer, emb_dim, drop_ratio = 0.5, JK = "last", residual = False, gnn_type = 'gin', expander_config: ExpanderConfig = ExpanderConfig()):
         '''
             emb_dim (int): node embedding dimensionality
             num_layer (int): number of GNN message passing layers
@@ -50,6 +52,8 @@ class GNN_node(torch.nn.Module):
         self.num_layer = num_layer
         self.drop_ratio = drop_ratio
         self.JK = JK
+        self.emb_dim = emb_dim
+        self.expander_config = expander_config
         ### add residual connection or not
         self.residual = residual
 
@@ -71,14 +75,30 @@ class GNN_node(torch.nn.Module):
             self.batch_norms.append(torch.nn.BatchNorm1d(emb_dim))
 
     def forward(self, batched_data):
+        # note `batch` is the indicator list for all nodes (includes virtual nodes in the case of cgp)
         x, edge_index, edge_attr, batch = batched_data.x, batched_data.edge_index, batched_data.edge_attr, batched_data.batch
+        if self.expander_config.uses_expander_layers():
+            expander_edge_index, expander_edge_attr = batched_data.expander_edge_index, batched_data.expander_edge_attr
+    
+        if self.expander_config.is_cgp():
+            virtual_node_mask = batched_data.virtual_node_mask
 
-        ### computing input node embedding
+        ### computing input node embedding (and adding virtual nodes)
+        if self.expander_config.is_cgp_with_zeroed_virtual_node_embeddings():
+            x_embeddings = torch.zeros((x.shape[0], self.emb_dim), device=x.device)
+            x_embeddings[~virtual_node_mask] = self.atom_encoder(x[~virtual_node_mask])
+        else:
+            x_embeddings = self.atom_encoder(x)
 
-        h_list = [self.atom_encoder(x)]
+        h_list = [x_embeddings]
+
         for layer in range(self.num_layer):
+            # Alternate between Cayley graph and input graph
+            if layer % 2 == 1 and self.expander_config.uses_expander_layers():
+                h = self.convs[layer](h_list[layer], expander_edge_index, expander_edge_attr)
+            else:
+                h = self.convs[layer](h_list[layer], edge_index, edge_attr)
 
-            h = self.convs[layer](h_list[layer], edge_index, edge_attr)
             h = self.batch_norms[layer](h)
 
             if layer == self.num_layer - 1:
@@ -100,7 +120,12 @@ class GNN_node(torch.nn.Module):
             for layer in range(self.num_layer + 1):
                 node_representation += h_list[layer]
 
-        return node_representation
+        # remove virtual nodes for downstream tasks
+        if self.expander_config.is_cgp():
+            node_representation = node_representation[~virtual_node_mask]
+            batch = batch[~virtual_node_mask]
+            
+        return node_representation, batch
 
 if __name__ == "__main__":
     pass

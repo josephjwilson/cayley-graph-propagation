@@ -3,11 +3,13 @@ from torch_geometric.loader import DataLoader
 import torch.optim as optim
 import torch.nn.functional as F
 from gnn import GNN
+import expander
 
 from tqdm import tqdm
 import argparse
 import time
 import numpy as np
+import os
 
 ### importing OGB
 from ogb.graphproppred import PygGraphPropPredDataset, Evaluator
@@ -59,6 +61,35 @@ def eval(model, device, loader, evaluator):
 
     return evaluator.eval(input_dict)
 
+def make_experiment_dataset_dir(dataset_name: str, expander_config_hash: str):
+    # we can't allow for experiments with different expander configurations to share the same pre-processed dataset.
+    # this is why we split the same dataset into different directories based on the expander configuration.
+    root_dir = 'dataset/' + expander_config_hash
+    if not os.path.exists(root_dir):
+        os.makedirs(root_dir)
+    
+    
+    base_root_dir = 'dataset/base'
+    if not os.path.exists(base_root_dir):
+        os.makedirs(base_root_dir)
+    ds = PygGraphPropPredDataset(name = dataset_name, root='dataset/base')
+    
+    dataset_dir = root_dir + '/' + ds.dir_name
+    dataset_base_dir = base_root_dir + '/' + ds.dir_name
+    if not os.path.exists(dataset_dir):
+        print('creating dataset dir: ' + dataset_dir)
+        os.makedirs(dataset_dir)
+        # copy all files from base dataset to experiment dataset (except for processed files)
+        for filename in os.listdir(dataset_base_dir):
+            if not filename.startswith('processed'):
+                if os.path.isdir(dataset_base_dir + '/' + filename):
+                    os.system('cp -r ' + dataset_base_dir + '/' + filename + ' ' + dataset_dir)
+                else:
+                    os.system('cp ' + dataset_base_dir + '/' + filename + ' ' + dataset_dir)
+            
+    return root_dir
+
+
 def main():
     # Training settings
     parser = argparse.ArgumentParser(description='GNN baselines on ogbgmol* data with Pytorch Geometrics')
@@ -66,6 +97,7 @@ def main():
                         help='which gpu to use if any (default: 0)')
     parser.add_argument('--gnn', type=str, default='gin-virtual',
                         help='GNN gin, gin-virtual, or gcn, or gcn-virtual (default: gin-virtual)')
+    parser.add_argument('--expander', type=str, default='none', choices=expander.ExpanderConfig.get_preset_names())
     parser.add_argument('--drop_ratio', type=float, default=0.5,
                         help='dropout ratio (default: 0.5)')
     parser.add_argument('--num_layer', type=int, default=5,
@@ -87,12 +119,12 @@ def main():
                         help='filename to output result (default: )')
     args = parser.parse_args()
 
-    # device = torch.device("cuda:" + str(args.device)) if torch.cuda.is_available() else torch.device("cpu")
-
-    device = torch.device("cpu")
+    device = torch.device("cuda:" + str(args.device)) if torch.cuda.is_available() else torch.device("cpu")
 
     ### automatic dataloading and splitting
-    dataset = PygGraphPropPredDataset(name = args.dataset)
+    expander_config = expander.ExpanderConfig.get_preset(args.expander)
+    root_dir = make_experiment_dataset_dir(args.dataset, expander_config.hash())
+    dataset = PygGraphPropPredDataset(name=args.dataset, root=root_dir, pre_transform=expander.PreTransform(expander_config))
 
     if args.feature == 'full':
         pass 
@@ -111,7 +143,7 @@ def main():
     valid_loader = DataLoader(dataset[split_idx["valid"]], batch_size=args.batch_size, shuffle=False, num_workers = args.num_workers)
     test_loader = DataLoader(dataset[split_idx["test"]], batch_size=args.batch_size, shuffle=False, num_workers = args.num_workers)
 
-    model = GNN(gnn_type = 'gin', num_tasks = dataset.num_tasks, num_layer = args.num_layer, emb_dim = args.emb_dim, drop_ratio = args.drop_ratio, virtual_node = False).to(device)
+    model = GNN(gnn_type = 'gin', num_tasks = dataset.num_tasks, num_layer = args.num_layer, emb_dim = args.emb_dim, drop_ratio = args.drop_ratio, virtual_node = False, expander_config=expander_config).to(device)
 
     optimizer = optim.Adam(model.parameters(), lr=0.001)
 

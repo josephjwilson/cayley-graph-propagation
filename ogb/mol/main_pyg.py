@@ -1,3 +1,4 @@
+import hashlib
 import torch
 from torch_geometric.loader import DataLoader
 import torch.optim as optim
@@ -95,8 +96,6 @@ def main():
     parser = argparse.ArgumentParser(description='GNN baselines on ogbgmol* data with Pytorch Geometrics')
     parser.add_argument('--device', type=int, default=0,
                         help='which gpu to use if any (default: 0)')
-    parser.add_argument('--gnn', type=str, default='gin-virtual',
-                        help='GNN gin, gin-virtual, or gcn, or gcn-virtual (default: gin-virtual)')
     parser.add_argument('--expander', type=str, default='none', choices=expander.ExpanderConfig.get_preset_names())
     parser.add_argument('--drop_ratio', type=float, default=0.5,
                         help='dropout ratio (default: 0.5)')
@@ -115,8 +114,6 @@ def main():
 
     parser.add_argument('--feature', type=str, default="full",
                         help='full feature or simple feature')
-    parser.add_argument('--filename', type=str, default="",
-                        help='filename to output result (default: )')
     args = parser.parse_args()
 
     device = torch.device("cuda:" + str(args.device)) if torch.cuda.is_available() else torch.device("cpu")
@@ -178,8 +175,29 @@ def main():
     print('Best validation score: {}'.format(valid_curve[best_val_epoch]))
     print('Test score: {}'.format(test_curve[best_val_epoch]))
 
-    if not args.filename == '':
-        torch.save({'Val': valid_curve[best_val_epoch], 'Test': test_curve[best_val_epoch], 'Train': train_curve[best_val_epoch], 'BestTrain': best_train}, args.filename)
+    results_dir = './results'
+    if not os.path.exists(results_dir):
+        os.makedirs(results_dir)
+    save_file_name = f"{results_dir}/{hashlib.md5(str(vars(args)).encode('utf-8')).hexdigest()}.pt"
+
+    counter = 1
+    while os.path.exists(save_file_name):
+        save_file_name = f"{results_dir}/{hashlib.md5(str(vars(args)).encode('utf-8')).hexdigest()}({counter}).pt"
+        counter += 1
+        if counter > 100:
+            raise RuntimeError('Too many files with the same hash!')
+
+    torch.save({
+        'best_val_epoch': best_val_epoch, 
+        'val_curve': valid_curve,
+        'test_curve': test_curve,
+        'train_curve': train_curve,
+        'Val': valid_curve[best_val_epoch], 
+        'Test': test_curve[best_val_epoch], 
+        'Train': train_curve[best_val_epoch], 
+        'BestTrain': best_train,
+        'args': vars(args),
+    }, save_file_name)
 
 
 if __name__ == "__main__":

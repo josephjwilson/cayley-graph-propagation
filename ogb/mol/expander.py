@@ -110,7 +110,11 @@ EXPANDER_CONFIGS = {
     'egp-an': ExpanderConfig(kind=ExpanderKind.EGP, prime_only=False),
     'cgp-an': ExpanderConfig(kind=ExpanderKind.CGP, zero_virtual_node_embeddings=True, prime_only=False),
     'cgp-an-nzvne': ExpanderConfig(kind=ExpanderKind.CGP, zero_virtual_node_embeddings=False, prime_only=False),
+    'egp-an-shfl': ExpanderConfig(kind=ExpanderKind.EGP, shuffle=ShuffleType.RANDOM, prime_only=True),
+    'cgp-an-shfl': ExpanderConfig(kind=ExpanderKind.CGP, zero_virtual_node_embeddings=True, shuffle=ShuffleType.RANDOM, prime_only=True),
+    'cgp-an-shfl-nzvne': ExpanderConfig(kind=ExpanderKind.CGP, zero_virtual_node_embeddings=False, shuffle=ShuffleType.RANDOM, prime_only=True),
 }
+
 assert len(set(config.hash() for config in EXPANDER_CONFIGS.values())) == len(EXPANDER_CONFIGS)
 
 class PreTransform:
